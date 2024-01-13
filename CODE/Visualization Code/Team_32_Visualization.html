@@ -1,0 +1,1560 @@
+<!DOCTYPE html>
+
+<!-- 
+Team 32
+CSE 6242
+Fall 2023 
+Visualization Code-->
+
+<meta charset="utf-8">
+
+<head>
+    <title>Regional Music Popularity Prediction</title>
+    <script type="text/javascript" src="../lib/d3.v5.min.js"></script>
+    <script type="text/javascript" src="../lib/d3-legend.min.js"></script>
+    <script type="text/javascript" src="../lib/d3-dsv.min.js"></script>
+    <script type="text/javascript" src="../lib/d3-geo-projection.v2.min.js"></script>
+    <script type="text/javascript" src="../lib/topojson.v2.min.js"></script>
+    <script type="text/javascript" src="../lib/d3-tip.min.js"></script>
+    <style>
+        /* define CSS rules here */
+        .tooltip {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+            box-sizing: border-box;
+            background-color: rgb(255, 255, 255);
+            border-radius: 2px;
+        }
+
+        .container {
+            display: inline-block;
+            margin-bottom: 5px;
+        }
+
+        .text {
+            display: inline-block;
+            margin-left: 50px;
+        }
+
+        .label {
+            float: right;
+            margin-right: 500;
+        }
+
+        .topcorner {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            font-size: medium;
+            font-weight: bolder;
+        }
+
+        .heading {
+            font-size: larger;
+            font-weight: bold;
+            text-align: left;
+            margin-top: 10px;
+            margin-left: 10px
+        }
+
+        .margin {
+            margin-top: 10px;
+        }
+
+        * {
+            font-family: sans-serif;
+        }
+
+        .plot-axis {
+            font-size: 18px;
+        }
+
+        .plot-heading {
+            font-size: 20px;
+            font-weight: bold;
+        }
+
+        .country-with-data {
+            cursor: pointer;
+        }
+    </style>
+</head>
+
+
+<body>
+
+    <div class="heading">Team 32-Fall 2023: Regional Music Popularity Prediction</div>
+    <!-- <div id='signature'>Team 32-Fall 2023</div> -->
+    <div class="topcorner">
+        <label for="gameDropdown">Select audio feature:</label>
+        <select id="gameDropdown"></select>
+    </div>
+
+    <div class="container" id="choropleth"></div>
+    <div class="container" id="heat_map"></div>
+    <div class="container" id="dot_plot_div"></div>
+    <div class="tooltip" id="tooltip"></div>
+
+    <script>
+        var country_map = createCountryMap()
+        var countryCodesMap = createCountryCodesMap()
+        var featureNames = ["acousticness", "danceability", "duration_ms", "energy", "instrumentalness", "liveness", "loudness", "speechiness", "tempo", "valence"]
+        var featuresRemoved = ["key", "mode", "time_signature"]
+        //REMOVED THESE FEATURES SINCE THEY ARE NOT NUMERIC DATA TYPE:  "key", "mode", "time_signature"
+        margin = { top: 0, right: 0, bottom: 0, left: 0 }
+        var width = 1600
+        var height = 880
+        var width_hm = width / 2 - 55
+        var height_hm = 700
+        var x_shift = -45
+        var y_shift = -30
+
+        // var isFirstCall = true;
+        // var currentPopularSongUSA = "Best Part (feat. H.E.R.)";
+        // var predictedSongUSA = "Just Lose It";
+        // var currentDotPlotData = null;
+        var currentPopularSong = "Best Part (feat. H.E.R.)";
+        var predictedPopularSong = "Just Lose It";
+        var currentCountryName = "USA";
+        var currentDotPlotData = [
+            {
+                "feature": "acousticness",
+                "song_data": "0.8849870155817401",
+                "country_data": "0.08032794578341522"
+            },
+            {
+                "feature": "valence",
+                "song_data": "0.42008486562942005",
+                "country_data": "0.9569429494079656"
+            },
+            {
+                "feature": "loudness",
+                "song_data": "0.4430897331053454",
+                "country_data": "0.839751166407465"
+            },
+            {
+                "feature": "speechiness",
+                "song_data": "0.04756871035940805",
+                "country_data": "0.09832134292565944"
+            },
+            {
+                "feature": "liveness",
+                "song_data": "0.09213407444837461",
+                "country_data": "0.26503340757238303"
+            },
+            {
+                "feature": "tempo",
+                "song_data": "0.06381042214830619",
+                "country_data": "0.39478090231519825"
+            },
+            {
+                "feature": "danceability",
+                "song_data": "0.3343750000000001",
+                "country_data": "0.9966159052453468"
+            },
+            {
+                "feature": "energy",
+                "song_data": "0.16329479768786126",
+                "country_data": "0.5290697674418606"
+            },
+            {
+                "feature": "instrumentalness",
+                "song_data": "0.0",
+                "country_data": "3.9310344827586205e-05"
+            }
+        ]
+        var choropleth = d3.select("div#choropleth")
+            .append("svg")
+            .attr("id", "choropleth")
+            .attr("width", width * .94)
+            .attr("height", height * .75)
+            .style("display", "block")
+            .style("border-radius", "5px")
+            .style('background-color', 'rgba(173,216,230,0.6)')
+            .attr("transform", "translate(0, 10)");
+
+        var countries = choropleth.append("g")
+            .attr("id", "countries")
+            .attr("transform", "translate(" + 0 + "," + margin.top + ")");
+
+        var projection = d3.geoNaturalEarth1().translate([width / 2 - 50, height / 2 - 110]).scale(240)
+        var path = d3.geoPath().projection(projection)
+        var world = d3.json("world_countries.json")
+
+        //predicted songs and their features per region
+        var feature_data = d3.csv("/outputs/normalised_final_predictions.csv")
+
+        //current most popular songs and their features per region
+        var popular_song_data = d3.csv("/input/current_most_popular_song_per_reg.csv")
+
+        var tip = d3.tip()
+            .attr('class', 'd3-tip')
+            .attr('id', 'tooltip')
+            .style('background-color', 'lightgray')
+            .offset([10, -10]);
+
+        Promise.all([world, feature_data, popular_song_data]).then(function (values) {
+            console.log("values =", values)
+            createChoropleth(values[0], featureNames[0], values[1], values[2])
+            setDropDown(null, values[0], values[1], values[2])
+            createDotPlot(currentDotPlotData, currentCountryName, predictedPopularSong, currentPopularSong);
+        }
+
+        );
+
+        function setDropDown(error, world_data, _feature_data, _popular_song_data) {
+            var dropdown = d3.select("#gameDropdown");
+            dropdown.selectAll("option")
+                .data(featureNames)
+                .enter()
+                .append("option")
+                .attr('value', function (d) { return d; })
+                .text(function (d) { return d; });
+
+            // event listener for the dropdown. Update choropleth and legend when selection changes. Call createMapAndLegend() with required arguments.
+            dropdown.on("change", function () {
+                selected_feature = this.value;
+                console.log("selected feature = ", selected_feature)
+                createChoropleth(world_data, selected_feature, _feature_data, _popular_song_data)
+                createDotPlot(currentDotPlotData,currentCountryName,predictedPopularSong,currentPopularSong);
+            });
+
+        }
+
+        //finds score of selected feature in each country and displays the map
+        function createChoropleth(world_data, selected_feature, _feature_data, _popular_song_data) {
+            d3.selectAll('path').remove();
+            d3.selectAll('#legend').remove();
+            var tip = d3.select('#tooltip');
+            var quartiles = d3.range(0, 1.25, 0.25).map(function (q) {
+                return d3.quantile(_feature_data.map(function (d) {
+                    return +d[selected_feature];
+                }).sort(d3.ascending), q);
+            });
+
+            var colorScale = d3.scaleQuantile()
+                .domain(quartiles)
+                .range(['#f5d9c1', '#fcc072', '#e36907', '#d60209']);
+            //Create a legend
+            var legend = d3.legendColor()
+                .scale(colorScale)
+                .shapeWidth(15)
+                .shapePadding(5)
+                .labelFormat(d3.format(".2f"));
+
+            console.log("made quartiles, colorScale and legend")
+            d3.select('svg#choropleth')
+                .append("g")
+                .attr('id', 'legend')
+                .attr("class", "legend")
+                .attr("transform", "translate(" + (width * .84) + "," + 40 + ")")
+                .call(legend);
+
+            console.log("created legend, redrawing map now", world_data, selected_feature, _feature_data)
+
+            const mapSvg = d3.select('#countries')
+            // Update the map
+            mapSvg.selectAll("path")
+                .data(world_data.features)
+                .enter()
+                .append("path")
+                .attr("class", function(d) {
+                    var countryHasData = _feature_data.find(feature_object => countryCodesMap[feature_object['available_markets']] === d.id);
+                    return countryHasData ? "country-with-data" : "";
+                })
+                .attr('d', path)
+                .style("fill", function (d) {
+                    // Find the corresponding country data in the feature data
+                    var country_data = _feature_data.find(feature_object => countryCodesMap[feature_object['available_markets']] === d.id);
+
+                    // Check if data is available for the country, if not, use a default color
+                    if (country_data) {
+                        return colorScale(+country_data[selected_feature]);
+                    } else {
+                        return "grey"; // Default color for countries with no data
+                    }
+                })
+                .on("mouseover", function (d) {
+                    //show tooltip on hover
+                    d3.selectAll(".country-with-data").style("cursor", "pointer");
+                    console.log("hovering over filter map")
+                    var country_data = _feature_data.find(function (feature_object) {
+                        //console.log("hovering over = ", feature_object)
+                        return countryCodesMap[feature_object['available_markets']] === d.id;
+                    });
+
+                    // Check if data is available for the country
+                    const tooltipText = "<b>Country: </b>" + d.properties.name + "<br/>" +
+                        "<b>" + selected_feature + ": </b>" + (country_data ? country_data[selected_feature] : "NO DATA");
+                    tip
+                        .html(tooltipText)
+                        .style("top", (event.pageY) + "px")
+                        .style("left", (event.pageX) + "px")
+                        .style("padding", "5px")
+                        .style('opacity', 0.9);
+
+                }).on("click", function (d) {
+                    var country_data = _feature_data.find(function (feature_object) {
+                        return countryCodesMap[feature_object['available_markets']] === d.id;
+                    });
+                    var song_country_data = _popular_song_data.find(function (row) {
+                        // console.log("hovering over = ", row)
+                        return countryCodesMap[row['available_markets']] === d.id;
+                    });
+                    // UPDATE HEAT MAP
+
+                    // Get values for a country
+                    acousticness = country_data["acousticness"]
+                    danceability = country_data["danceability"]
+                    duration_ms = country_data["duration_ms"]
+                    energy = country_data["energy"]
+                    instrumentalness = country_data["instrumentalness"]
+                    liveness = country_data["liveness"]
+                    loudness = country_data["loudness"]
+                    speechiness = country_data["speechiness"]
+                    tempo = country_data["tempo"]
+                    valence = country_data["valence"]
+
+                    // Find "difference" between all values, calculated as the absolute value of the distance between them
+                    base_matrix = [acousticness, danceability, duration_ms, energy, instrumentalness, liveness, loudness, speechiness, tempo, valence]
+
+                    data_matrix = [];
+                    for (i = 0; i < 10; i++) {
+                        array_row = []
+                        for (j = 0; j < 10; j++) {
+                            array_row.push(1 - Math.abs(base_matrix[i] - base_matrix[j]))
+                        }
+                        data_matrix.push(array_row)
+                    }
+
+                    // scale for hsl() color notation
+                    for (i = 0; i < 10; i++) {
+                        for (j = 0; j < 10; j++) {
+                            data_matrix[i][j] = 1 - (data_matrix[i][j] / 2)
+                        }
+                    }
+
+                    // update box colors
+                    for (i = 0; i < 10; i++) {
+                        for (j = 0; j < 10; j++) {
+                            box_id = "0" + i + "0" + j
+                            box = document.getElementById("box" + box_id)
+                            box.setAttribute("fill", "hsl(0,100%," + data_matrix[i][j] * 100 + "%")
+                        }
+                    }
+
+                    // update title, too
+                    title = document.getElementById("title")
+                    title.textContent = "Popularity Feature Heat Map for " + country_map[countryCodesMap[country_data['available_markets']]]
+
+                    //DOT PLOT
+                    var jsonString = country_data['feature_importance'].replace(/'/g, '"');
+                    var pairs = new Map(Object.entries(JSON.parse(jsonString)));
+                    console.log("pairs = ", pairs)
+                    // Get a list of keys
+                    var keys = Array.from(pairs.keys());
+                    var filteredKeys = keys.filter(key => featureNames.includes(key));
+                    console.log("features sorted in decreasing order of rank = ", filteredKeys)
+
+                    //preparing data for sot plot
+                    var dot_plot_data = [];
+                    filteredKeys.forEach(function (row) {
+                        console.log(row);
+                        var obj = {}
+                        //name of feature
+                        obj['feature'] = row;
+                        //current popular song data
+                        obj['song_data'] = song_country_data[row];
+                        //predicted popular song data
+                        obj['country_data'] = country_data[row];
+                        dot_plot_data.push(obj);
+                    });
+                    // isFirstCall = false;
+                    console.log("dot plot data = ", dot_plot_data)
+
+                    currentDotPlotData = dot_plot_data;
+                    currentCountryName = country_map[countryCodesMap[country_data['available_markets']]];
+                    predictedPopularSong = country_data['track_name']
+                    currentPopularSong = song_country_data['track_name']
+                    createDotPlot(currentDotPlotData, currentCountryName, predictedPopularSong, currentPopularSong);
+                })
+                .on("mouseout", function (d) {
+                    //hide tooltip when away
+                    tip.style('opacity', 0)
+                    d3.select(this).style("cursor", "default");
+                });
+            console.log("done")
+        }
+
+        function createDotPlot(dotPlotData, countryName, actualPopularSong, predictedPopularSong) {
+            //clear elements in plot
+            d3.select('#dot_plot_div').selectAll("*").remove();
+            console.log("creating dot plot for ", countryName, actualPopularSong, predictedPopularSong)
+
+            // Define the dimensions of the dot plot
+            var dotPlotWidth = width_hm;
+            var dotPlotHeight = height_hm;
+            var dotPlotMargin = { top: 10, right: 10, bottom: 10, left: 10 };
+
+            let dotPlotContainer = d3.select("#dot_plot_div")
+                .append("svg")
+                .attr("id", "dot_plot")
+                .attr("width", dotPlotWidth)
+                .attr("height", dotPlotHeight)
+                .style("border-radius", "5px")
+                .style("background", "rgba(173,216,230,0.6)")
+                .attr("transform", "translate(" + 10 + "," + 15 + ")");
+
+            var dot_plot_title = dotPlotContainer
+                .append("text")
+                .attr("id", "title")
+                .text("Feature Importance in Current vs Predicted Popular Songs for " + countryName)
+                .attr("text-anchor", "middle")
+                .style("fill", "black")
+                .attr("class", "plot-heading")
+                .attr("transform", "translate(" + dotPlotWidth / 2 + ",30)")
+
+            // Create scales for the dot plot
+            var x = d3.scaleLinear()
+                .domain([0, 1])
+                .range([0, dotPlotWidth * .75]);
+
+            var y = d3.scaleBand()
+                .domain(dotPlotData.map(d => d.feature))
+                .range([dotPlotHeight * .8, 0]);
+            // .padding(1);
+
+            // Create SVG for the dot plot
+            var dotPlotSvg = dotPlotContainer
+                .append("svg")
+                .attr("id", "dot_plot_svg")
+                .attr("width", dotPlotWidth)
+                .attr("height", dotPlotHeight)
+                .append("g")
+                .attr("transform", "translate(" + 150 + "," + 100 + ")")
+
+            dotPlotSvg.append("g")
+                .attr("id", "x-axis")
+                .attr("transform", "translate(" + 0 + "," + (dotPlotHeight * .8) + ")")
+                .attr("class", "plot-axis")
+                .call(d3.axisBottom(x))
+
+            dotPlotSvg.append("g")
+                .attr("id", "y-axis")
+                .attr("class", "plot-axis")
+                .call(d3.axisLeft(y))
+            // Lines
+            dotPlotSvg.selectAll("lines")
+                .data(dotPlotData)
+                .enter()
+                .append("line")
+                .attr("x1", function (d) { return x(+d.song_data); })
+                .attr("x2", function (d) { return x(+d.country_data); })
+                .attr("y1", function (d) { return y(d.feature); })
+                .attr("y2", function (d) { return y(d.feature); })
+                .attr("transform", "translate(" + 0 + "," + 30 + ")")
+                .attr("stroke", "black")
+                .attr("stroke-width", "1px")
+
+            // Circles of variable 1
+            dotPlotSvg.selectAll("mycircle")
+                .data(dotPlotData)
+                .enter()
+                .append("circle")
+                .attr("cx", function (d) { return x(+d.song_data); })
+                .attr("cy", function (d) { return y(d.feature); })
+                .attr("transform", "translate(" + 0 + "," + 30 + ")")
+                .attr("r", "6")
+                .style("fill", "#e67e22") //orange -> current popular song
+
+            // Circles of variable 2
+            dotPlotSvg.selectAll("mycircle")
+                .data(dotPlotData)
+                .enter()
+                .append("circle")
+                .attr("cx", function (d) { return x(+d.country_data); })
+                .attr("cy", function (d) { return y(d.feature); })
+                .attr("transform", "translate(" + 0 + "," + 30 + ")")
+                .attr("r", "6")
+                .style("fill", "#3498db") //blue -> predicted song
+
+            //Legend
+            dotPlotContainer
+                .append("circle")
+                .attr("id","legend-circle")
+                .attr("transform", "translate(" + 110 + "," + 50 + ")")
+                .attr("r", "6")
+                .style("fill", "#e67e22")
+
+            dotPlotContainer.append("text")
+                .text("Current Popular Song: " + actualPopularSong)
+                .style("font-size","18px")
+                .style("fill", "black")
+                .attr("transform", "translate(" + 130 + "," + 55 + ")")
+
+            dotPlotContainer
+                .append("circle")
+                .attr("transform", "translate(" + 110 + "," + 70 + ")")
+                .attr("r", "6")
+                .style("fill", "#3498db")
+
+            dotPlotContainer.append("text")
+                .text("Predicted Song: " + predictedPopularSong)
+                .style("font-size","18px")
+                .style("fill", "black")
+                .attr("transform", "translate(" + 130 + "," + 75 + ")")
+        }
+
+        // Initialize Heat Map
+        // US Data
+        acousticness = 0.08032794578341522
+        danceability = 0.9966159052453468
+        duration_ms = 0.4665418139940468
+        energy = 0.5290697674418606
+        instrumentalness = 3.9310344827586205e-05
+        liveness = 0.26503340757238303
+        loudness = 0.839751166407465
+        speechiness = 0.09832134292565944
+        tempo = 0.39478090231519825
+        valence = 0.9569429494079656
+
+        base_matrix = [acousticness, danceability, duration_ms, energy, instrumentalness, liveness, loudness, speechiness, tempo, valence]
+
+        features_dummy_data = [];
+        for (i = 0; i < 10; i++) {
+            array_row = []
+            for (j = 0; j < 10; j++) {
+                array_row.push(1 - Math.abs(base_matrix[i] - base_matrix[j]))
+            }
+            features_dummy_data.push(array_row)
+        }
+
+        for (i = 0; i < 10; i++) {
+            for (j = 0; j < 10; j++) {
+                features_dummy_data[i][j] = 1 - (features_dummy_data[i][j] / 2)
+            }
+        }
+
+        let heat_map = d3
+            .select("div#heat_map")
+            .append("svg")
+            .attr("id", "heat_map")
+            .attr("width", width_hm)
+            .attr("height", height_hm)
+            .style("border-radius", "5px")
+            .style("background", "rgba(173,216,230,0.6)") //#c9e8fd
+            .attr("transform", "translate(" + 0 + "," + 15 + ")");
+
+        var heat_map_title = heat_map.append("text")
+            .attr("id", "title")
+            .text("Popularity Feature Heat Map for USA")
+            .attr("text-anchor", "middle")
+            .style("fill", "black")
+            .attr("class", "plot-heading")
+            .attr("transform", "translate(" + width_hm / 2 + ",30)")
+
+        heat_map.append("text")
+            .text(featureNames[0])
+            .attr("text-anchor", "end")
+            .style("fill", "black")
+            .style("font-size", "18px")
+            .attr("transform", "translate(" + (195 + x_shift) + "," + (231 + y_shift) + ")")
+        heat_map.append("text")
+            .text(featureNames[1])
+            .attr("text-anchor", "end")
+            .style("fill", "black")
+            .style("font-size", "18px")
+            .attr("transform", "translate(" + (195 + x_shift) + "," + (281 + y_shift) + ")")
+        heat_map.append("text")
+            .text(featureNames[2])
+            .attr("text-anchor", "end")
+            .style("fill", "black")
+            .style("font-size", "18px")
+            .attr("transform", "translate(" + (195 + x_shift) + "," + (331 + y_shift) + ")")
+        heat_map.append("text")
+            .text(featureNames[3])
+            .attr("text-anchor", "end")
+            .style("fill", "black")
+            .style("font-size", "18px")
+            .attr("transform", "translate(" + (195 + x_shift) + "," + (381 + y_shift) + ")")
+        heat_map.append("text")
+            .text(featureNames[4])
+            .attr("text-anchor", "end")
+            .style("fill", "black")
+            .style("font-size", "18px")
+            .attr("transform", "translate(" + (195 + x_shift) + "," + (431 + y_shift) + ")")
+        heat_map.append("text")
+            .text(featureNames[5])
+            .attr("text-anchor", "end")
+            .style("fill", "black")
+            .style("font-size", "18px")
+            .attr("transform", "translate(" + (195 + x_shift) + "," + (481 + y_shift) + ")")
+        heat_map.append("text")
+            .text(featureNames[6])
+            .attr("text-anchor", "end")
+            .style("fill", "black")
+            .style("font-size", "18px")
+            .attr("transform", "translate(" + (195 + x_shift) + "," + (531 + y_shift) + ")")
+        heat_map.append("text")
+            .text(featureNames[7])
+            .attr("text-anchor", "end")
+            .style("fill", "black")
+            .style("font-size", "18px")
+            .attr("transform", "translate(" + (195 + x_shift) + "," + (581 + y_shift) + ")")
+        heat_map.append("text")
+            .text(featureNames[8])
+            .attr("text-anchor", "end")
+            .style("fill", "black")
+            .style("font-size", "18px")
+            .attr("transform", "translate(" + (195 + x_shift) + "," + (631 + y_shift) + ")")
+        heat_map.append("text")
+            .text(featureNames[9])
+            .attr("text-anchor", "end")
+            .style("fill", "black")
+            .style("font-size", "18px")
+            .attr("transform", "translate(" + (195 + x_shift) + "," + (681 + y_shift) + ")")
+
+        heat_map.append("text")
+            .text(featureNames[0])
+            .attr("text-anchor", "end")
+            .style("fill", "black")
+            .style("font-size", "18px")
+            .attr("transform", "translate(" + (225 + x_shift) + "," + (200 + y_shift) + "), rotate(40)")
+        heat_map.append("text")
+            .text(featureNames[1])
+            .attr("text-anchor", "end")
+            .style("fill", "black")
+            .style("font-size", "18px")
+            .attr("transform", "translate(" + (275 + x_shift) + "," + (200 + y_shift) + "), rotate(40)")
+        heat_map.append("text")
+            .text(featureNames[2])
+            .attr("text-anchor", "end")
+            .style("fill", "black")
+            .style("font-size", "18px")
+            .attr("transform", "translate(" + (325 + x_shift) + "," + (200 + y_shift) + "), rotate(40)")
+        heat_map.append("text")
+            .text(featureNames[3])
+            .attr("text-anchor", "end")
+            .style("fill", "black")
+            .style("font-size", "18px")
+            .attr("transform", "translate(" + (375 + x_shift) + "," + (200 + y_shift) + "), rotate(40)")
+        heat_map.append("text")
+            .text(featureNames[4])
+            .attr("text-anchor", "end")
+            .style("fill", "black")
+            .style("font-size", "18px")
+            .attr("transform", "translate(" + (425 + x_shift) + "," + (200 + y_shift) + "), rotate(40)")
+        heat_map.append("text")
+            .text(featureNames[5])
+            .attr("text-anchor", "end")
+            .style("fill", "black")
+            .style("font-size", "18px")
+            .attr("transform", "translate(" + (475 + x_shift) + "," + (200 + y_shift) + "), rotate(40)")
+        heat_map.append("text")
+            .text(featureNames[6])
+            .attr("text-anchor", "end")
+            .style("fill", "black")
+            .style("font-size", "18px")
+            .attr("transform", "translate(" + (525 + x_shift) + "," + (200 + y_shift) + "), rotate(40)")
+        heat_map.append("text")
+            .text(featureNames[7])
+            .attr("text-anchor", "end")
+            .style("fill", "black")
+            .style("font-size", "18px")
+            .attr("transform", "translate(" + (575 + x_shift) + "," + (200 + y_shift) + "), rotate(40)")
+        heat_map.append("text")
+            .text(featureNames[8])
+            .attr("text-anchor", "end")
+            .style("fill", "black")
+            .style("font-size", "18px")
+            .attr("transform", "translate(" + (625 + x_shift) + "," + (200 + y_shift) + "), rotate(40)")
+        heat_map.append("text")
+            .text(featureNames[9])
+            .attr("text-anchor", "end")
+            .style("fill", "black")
+            .style("font-size", "18px")
+            .attr("transform", "translate(" + (675 + x_shift) + "," + (200 + y_shift) + "), rotate(40)")
+
+        // legend
+        var defs = heat_map.append("defs")
+        var linGradient = defs.append("linearGradient")
+            .attr("id", "linearGradient1")
+            .attr("gradientTransform", "rotate(90)")
+        linGradient.append("stop")
+            .attr("stop-color", "hsl(0,100%,50%)")
+            .attr("offset", "0%")
+        linGradient.append("stop")
+            .attr("stop-color", "hsl(0,100%,100%)")
+            .attr("offset", "100%")
+        heat_map.append("polygon")
+            .attr("fill", "url('#linearGradient1')")
+            .attr("points", "" + (730 + x_shift) + "," + (241 + y_shift) + " " + (772 + x_shift) + "," + (241 + y_shift) + " " + (772 + x_shift) + "," + (659 + y_shift) + " " + (730 + x_shift) + "," + (659 + y_shift) + "")
+        heat_map.append("text")
+            .text("MAX")
+            .attr("text-anchor", "middle")
+            .style("fill", "black")
+            .style("font-size", "18px")
+            .attr("transform", "translate(" + (751 + x_shift) + "," + (230 + y_shift) + ")")
+        heat_map.append("text")
+            .text("MIN")
+            .attr("text-anchor", "middle")
+            .style("fill", "black")
+            .style("font-size", "18px")
+            .attr("transform", "translate(" + (751 + x_shift) + "," + (687 + y_shift) + ")")
+
+
+        var box0000 = heat_map.append("polygon")
+            .attr("id", "box0000")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[0][0] * 100 + "%")
+            .attr("points", "" + (201 + x_shift) + "," + (201 + y_shift) + " " + (249 + x_shift) + "," + (201 + y_shift) + " " + (249 + x_shift) + "," + (249 + y_shift) + " " + (201 + x_shift) + "," + (249 + y_shift) + "")
+        var box0001 = heat_map.append("polygon")
+            .attr("id", "box0001")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[0][1] * 100 + "%")
+            .attr("points", "" + (251 + x_shift) + "," + (201 + y_shift) + " " + (299 + x_shift) + "," + (201 + y_shift) + " " + (299 + x_shift) + "," + (249 + y_shift) + " " + (251 + x_shift) + "," + (249 + y_shift) + "")
+        var box0002 = heat_map.append("polygon")
+            .attr("id", "box0002")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[0][2] * 100 + "%")
+            .attr("points", "" + (301 + x_shift) + "," + (201 + y_shift) + " " + (349 + x_shift) + "," + (201 + y_shift) + " " + (349 + x_shift) + "," + (249 + y_shift) + " " + (301 + x_shift) + "," + (249 + y_shift) + "")
+        var box0003 = heat_map.append("polygon")
+            .attr("id", "box0003")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[0][3] * 100 + "%")
+            .attr("points", "" + (351 + x_shift) + "," + (201 + y_shift) + " " + (399 + x_shift) + "," + (201 + y_shift) + " " + (399 + x_shift) + "," + (249 + y_shift) + " " + (351 + x_shift) + "," + (249 + y_shift) + "")
+        var box0004 = heat_map.append("polygon")
+            .attr("id", "box0004")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[0][4] * 100 + "%")
+            .attr("points", "" + (401 + x_shift) + "," + (201 + y_shift) + " " + (449 + x_shift) + "," + (201 + y_shift) + " " + (449 + x_shift) + "," + (249 + y_shift) + " " + (401 + x_shift) + "," + (249 + y_shift) + "")
+        var box0005 = heat_map.append("polygon")
+            .attr("id", "box0005")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[0][5] * 100 + "%")
+            .attr("points", "" + (451 + x_shift) + "," + (201 + y_shift) + " " + (499 + x_shift) + "," + (201 + y_shift) + " " + (499 + x_shift) + "," + (249 + y_shift) + " " + (451 + x_shift) + "," + (249 + y_shift) + "")
+        var box0006 = heat_map.append("polygon")
+            .attr("id", "box0006")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[0][6] * 100 + "%")
+            .attr("points", "" + (501 + x_shift) + "," + (201 + y_shift) + " " + (549 + x_shift) + "," + (201 + y_shift) + " " + (549 + x_shift) + "," + (249 + y_shift) + " " + (501 + x_shift) + "," + (249 + y_shift) + "")
+        var box0007 = heat_map.append("polygon")
+            .attr("id", "box0007")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[0][7] * 100 + "%")
+            .attr("points", "" + (551 + x_shift) + "," + (201 + y_shift) + " " + (599 + x_shift) + "," + (201 + y_shift) + " " + (599 + x_shift) + "," + (249 + y_shift) + " " + (551 + x_shift) + "," + (249 + y_shift) + "")
+        var box0008 = heat_map.append("polygon")
+            .attr("id", "box0008")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[0][8] * 100 + "%")
+            .attr("points", "" + (601 + x_shift) + "," + (201 + y_shift) + " " + (649 + x_shift) + "," + (201 + y_shift) + " " + (649 + x_shift) + "," + (249 + y_shift) + " " + (601 + x_shift) + "," + (249 + y_shift) + "")
+        var box0009 = heat_map.append("polygon")
+            .attr("id", "box0009")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[0][9] * 100 + "%")
+            .attr("points", "" + (651 + x_shift) + "," + (201 + y_shift) + " " + (699 + x_shift) + "," + (201 + y_shift) + " " + (699 + x_shift) + "," + (249 + y_shift) + " " + (651 + x_shift) + "," + (249 + y_shift) + "")
+
+        var box0100 = heat_map.append("polygon")
+            .attr("id", "box0100")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[1][0] * 100 + "%")
+            .attr("points", "" + (201 + x_shift) + "," + (251 + y_shift) + " " + (249 + x_shift) + "," + (251 + y_shift) + " " + (249 + x_shift) + "," + (299 + y_shift) + " " + (201 + x_shift) + "," + (299 + y_shift) + "")
+        var box0101 = heat_map.append("polygon")
+            .attr("id", "box0101")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[1][1] * 100 + "%")
+            .attr("points", "" + (251 + x_shift) + "," + (251 + y_shift) + " " + (299 + x_shift) + "," + (251 + y_shift) + " " + (299 + x_shift) + "," + (299 + y_shift) + " " + (251 + x_shift) + "," + (299 + y_shift) + "")
+        var box0102 = heat_map.append("polygon")
+            .attr("id", "box0102")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[1][2] * 100 + "%")
+            .attr("points", "" + (301 + x_shift) + "," + (251 + y_shift) + " " + (349 + x_shift) + "," + (251 + y_shift) + " " + (349 + x_shift) + "," + (299 + y_shift) + " " + (301 + x_shift) + "," + (299 + y_shift) + "")
+        var box0103 = heat_map.append("polygon")
+            .attr("id", "box0103")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[1][3] * 100 + "%")
+            .attr("points", "" + (351 + x_shift) + "," + (251 + y_shift) + " " + (399 + x_shift) + "," + (251 + y_shift) + " " + (399 + x_shift) + "," + (299 + y_shift) + " " + (351 + x_shift) + "," + (299 + y_shift) + "")
+        var box0104 = heat_map.append("polygon")
+            .attr("id", "box0104")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[1][4] * 100 + "%")
+            .attr("points", "" + (401 + x_shift) + "," + (251 + y_shift) + " " + (449 + x_shift) + "," + (251 + y_shift) + " " + (449 + x_shift) + "," + (299 + y_shift) + " " + (401 + x_shift) + "," + (299 + y_shift) + "")
+        var box0105 = heat_map.append("polygon")
+            .attr("id", "box0105")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[1][5] * 100 + "%")
+            .attr("points", "" + (451 + x_shift) + "," + (251 + y_shift) + " " + (499 + x_shift) + "," + (251 + y_shift) + " " + (499 + x_shift) + "," + (299 + y_shift) + " " + (451 + x_shift) + "," + (299 + y_shift) + "")
+        var box0106 = heat_map.append("polygon")
+            .attr("id", "box0106")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[1][6] * 100 + "%")
+            .attr("points", "" + (501 + x_shift) + "," + (251 + y_shift) + " " + (549 + x_shift) + "," + (251 + y_shift) + " " + (549 + x_shift) + "," + (299 + y_shift) + " " + (501 + x_shift) + "," + (299 + y_shift) + "")
+        var box0107 = heat_map.append("polygon")
+            .attr("id", "box0107")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[1][7] * 100 + "%")
+            .attr("points", "" + (551 + x_shift) + "," + (251 + y_shift) + " " + (599 + x_shift) + "," + (251 + y_shift) + " " + (599 + x_shift) + "," + (299 + y_shift) + " " + (551 + x_shift) + "," + (299 + y_shift) + "")
+        var box0108 = heat_map.append("polygon")
+            .attr("id", "box0108")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[1][8] * 100 + "%")
+            .attr("points", "" + (601 + x_shift) + "," + (251 + y_shift) + " " + (649 + x_shift) + "," + (251 + y_shift) + " " + (649 + x_shift) + "," + (299 + y_shift) + " " + (601 + x_shift) + "," + (299 + y_shift) + "")
+        var box0109 = heat_map.append("polygon")
+            .attr("id", "box0109")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[1][9] * 100 + "%")
+            .attr("points", "" + (651 + x_shift) + "," + (251 + y_shift) + " " + (699 + x_shift) + "," + (251 + y_shift) + " " + (699 + x_shift) + "," + (299 + y_shift) + " " + (651 + x_shift) + "," + (299 + y_shift) + "")
+
+        var box0200 = heat_map.append("polygon")
+            .attr("id", "box0200")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[2][0] * 100 + "%")
+            .attr("points", "" + (201 + x_shift) + "," + (301 + y_shift) + " " + (249 + x_shift) + "," + (301 + y_shift) + " " + (249 + x_shift) + "," + (349 + y_shift) + " " + (201 + x_shift) + "," + (349 + y_shift) + "")
+        var box0201 = heat_map.append("polygon")
+            .attr("id", "box0201")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[2][1] * 100 + "%")
+            .attr("points", "" + (251 + x_shift) + "," + (301 + y_shift) + " " + (299 + x_shift) + "," + (301 + y_shift) + " " + (299 + x_shift) + "," + (349 + y_shift) + " " + (251 + x_shift) + "," + (349 + y_shift) + "")
+        var box0202 = heat_map.append("polygon")
+            .attr("id", "box0202")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[2][2] * 100 + "%")
+            .attr("points", "" + (301 + x_shift) + "," + (301 + y_shift) + " " + (349 + x_shift) + "," + (301 + y_shift) + " " + (349 + x_shift) + "," + (349 + y_shift) + " " + (301 + x_shift) + "," + (349 + y_shift) + "")
+        var box0203 = heat_map.append("polygon")
+            .attr("id", "box0203")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[2][3] * 100 + "%")
+            .attr("points", "" + (351 + x_shift) + "," + (301 + y_shift) + " " + (399 + x_shift) + "," + (301 + y_shift) + " " + (399 + x_shift) + "," + (349 + y_shift) + " " + (351 + x_shift) + "," + (349 + y_shift) + "")
+        var box0204 = heat_map.append("polygon")
+            .attr("id", "box0204")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[2][4] * 100 + "%")
+            .attr("points", "" + (401 + x_shift) + "," + (301 + y_shift) + " " + (449 + x_shift) + "," + (301 + y_shift) + " " + (449 + x_shift) + "," + (349 + y_shift) + " " + (401 + x_shift) + "," + (349 + y_shift) + "")
+        var box0205 = heat_map.append("polygon")
+            .attr("id", "box0205")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[2][5] * 100 + "%")
+            .attr("points", "" + (451 + x_shift) + "," + (301 + y_shift) + " " + (499 + x_shift) + "," + (301 + y_shift) + " " + (499 + x_shift) + "," + (349 + y_shift) + " " + (451 + x_shift) + "," + (349 + y_shift) + "")
+        var box0206 = heat_map.append("polygon")
+            .attr("id", "box0206")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[2][6] * 100 + "%")
+            .attr("points", "" + (501 + x_shift) + "," + (301 + y_shift) + " " + (549 + x_shift) + "," + (301 + y_shift) + " " + (549 + x_shift) + "," + (349 + y_shift) + " " + (501 + x_shift) + "," + (349 + y_shift) + "")
+        var box0207 = heat_map.append("polygon")
+            .attr("id", "box0207")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[2][7] * 100 + "%")
+            .attr("points", "" + (551 + x_shift) + "," + (301 + y_shift) + " " + (599 + x_shift) + "," + (301 + y_shift) + " " + (599 + x_shift) + "," + (349 + y_shift) + " " + (551 + x_shift) + "," + (349 + y_shift) + "")
+        var box0208 = heat_map.append("polygon")
+            .attr("id", "box0208")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[2][8] * 100 + "%")
+            .attr("points", "" + (601 + x_shift) + "," + (301 + y_shift) + " " + (649 + x_shift) + "," + (301 + y_shift) + " " + (649 + x_shift) + "," + (349 + y_shift) + " " + (601 + x_shift) + "," + (349 + y_shift) + "")
+        var box0209 = heat_map.append("polygon")
+            .attr("id", "box0209")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[2][9] * 100 + "%")
+            .attr("points", "" + (651 + x_shift) + "," + (301 + y_shift) + " " + (699 + x_shift) + "," + (301 + y_shift) + " " + (699 + x_shift) + "," + (349 + y_shift) + " " + (651 + x_shift) + "," + (349 + y_shift) + "")
+
+        var box0300 = heat_map.append("polygon")
+            .attr("id", "box0300")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[3][0] * 100 + "%")
+            .attr("points", "" + (201 + x_shift) + "," + (351 + y_shift) + " " + (249 + x_shift) + "," + (351 + y_shift) + " " + (249 + x_shift) + "," + (399 + y_shift) + " " + (201 + x_shift) + "," + (399 + y_shift) + "")
+        var box0301 = heat_map.append("polygon")
+            .attr("id", "box0301")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[3][1] * 100 + "%")
+            .attr("points", "" + (251 + x_shift) + "," + (351 + y_shift) + " " + (299 + x_shift) + "," + (351 + y_shift) + " " + (299 + x_shift) + "," + (399 + y_shift) + " " + (251 + x_shift) + "," + (399 + y_shift) + "")
+        var box0302 = heat_map.append("polygon")
+            .attr("id", "box0302")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[3][2] * 100 + "%")
+            .attr("points", "" + (301 + x_shift) + "," + (351 + y_shift) + " " + (349 + x_shift) + "," + (351 + y_shift) + " " + (349 + x_shift) + "," + (399 + y_shift) + " " + (301 + x_shift) + "," + (399 + y_shift) + "")
+        var box0303 = heat_map.append("polygon")
+            .attr("id", "box0303")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[3][3] * 100 + "%")
+            .attr("points", "" + (351 + x_shift) + "," + (351 + y_shift) + " " + (399 + x_shift) + "," + (351 + y_shift) + " " + (399 + x_shift) + "," + (399 + y_shift) + " " + (351 + x_shift) + "," + (399 + y_shift) + "")
+        var box0304 = heat_map.append("polygon")
+            .attr("id", "box0304")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[3][4] * 100 + "%")
+            .attr("points", "" + (401 + x_shift) + "," + (351 + y_shift) + " " + (449 + x_shift) + "," + (351 + y_shift) + " " + (449 + x_shift) + "," + (399 + y_shift) + " " + (401 + x_shift) + "," + (399 + y_shift) + "")
+        var box0305 = heat_map.append("polygon")
+            .attr("id", "box0305")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[3][5] * 100 + "%")
+            .attr("points", "" + (451 + x_shift) + "," + (351 + y_shift) + " " + (499 + x_shift) + "," + (351 + y_shift) + " " + (499 + x_shift) + "," + (399 + y_shift) + " " + (451 + x_shift) + "," + (399 + y_shift) + "")
+        var box0306 = heat_map.append("polygon")
+            .attr("id", "box0306")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[3][6] * 100 + "%")
+            .attr("points", "" + (501 + x_shift) + "," + (351 + y_shift) + " " + (549 + x_shift) + "," + (351 + y_shift) + " " + (549 + x_shift) + "," + (399 + y_shift) + " " + (501 + x_shift) + "," + (399 + y_shift) + "")
+        var box0307 = heat_map.append("polygon")
+            .attr("id", "box0307")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[3][7] * 100 + "%")
+            .attr("points", "" + (551 + x_shift) + "," + (351 + y_shift) + " " + (599 + x_shift) + "," + (351 + y_shift) + " " + (599 + x_shift) + "," + (399 + y_shift) + " " + (551 + x_shift) + "," + (399 + y_shift) + "")
+        var box0308 = heat_map.append("polygon")
+            .attr("id", "box0308")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[3][8] * 100 + "%")
+            .attr("points", "" + (601 + x_shift) + "," + (351 + y_shift) + " " + (649 + x_shift) + "," + (351 + y_shift) + " " + (649 + x_shift) + "," + (399 + y_shift) + " " + (601 + x_shift) + "," + (399 + y_shift) + "")
+        var box0309 = heat_map.append("polygon")
+            .attr("id", "box0309")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[3][9] * 100 + "%")
+            .attr("points", "" + (651 + x_shift) + "," + (351 + y_shift) + " " + (699 + x_shift) + "," + (351 + y_shift) + " " + (699 + x_shift) + "," + (399 + y_shift) + " " + (651 + x_shift) + "," + (399 + y_shift) + "")
+
+        var box0400 = heat_map.append("polygon")
+            .attr("id", "box0400")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[4][0] * 100 + "%")
+            .attr("points", "" + (201 + x_shift) + "," + (401 + y_shift) + " " + (249 + x_shift) + "," + (401 + y_shift) + " " + (249 + x_shift) + "," + (449 + y_shift) + " " + (201 + x_shift) + "," + (449 + y_shift) + "")
+        var box0401 = heat_map.append("polygon")
+            .attr("id", "box0401")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[4][1] * 100 + "%")
+            .attr("points", "" + (251 + x_shift) + "," + (401 + y_shift) + " " + (299 + x_shift) + "," + (401 + y_shift) + " " + (299 + x_shift) + "," + (449 + y_shift) + " " + (251 + x_shift) + "," + (449 + y_shift) + "")
+        var box0402 = heat_map.append("polygon")
+            .attr("id", "box0402")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[4][2] * 100 + "%")
+            .attr("points", "" + (301 + x_shift) + "," + (401 + y_shift) + " " + (349 + x_shift) + "," + (401 + y_shift) + " " + (349 + x_shift) + "," + (449 + y_shift) + " " + (301 + x_shift) + "," + (449 + y_shift) + "")
+        var box0403 = heat_map.append("polygon")
+            .attr("id", "box0403")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[4][3] * 100 + "%")
+            .attr("points", "" + (351 + x_shift) + "," + (401 + y_shift) + " " + (399 + x_shift) + "," + (401 + y_shift) + " " + (399 + x_shift) + "," + (449 + y_shift) + " " + (351 + x_shift) + "," + (449 + y_shift) + "")
+        var box0404 = heat_map.append("polygon")
+            .attr("id", "box0404")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[4][4] * 100 + "%")
+            .attr("points", "" + (401 + x_shift) + "," + (401 + y_shift) + " " + (449 + x_shift) + "," + (401 + y_shift) + " " + (449 + x_shift) + "," + (449 + y_shift) + " " + (401 + x_shift) + "," + (449 + y_shift) + "")
+        var box0405 = heat_map.append("polygon")
+            .attr("id", "box0405")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[4][5] * 100 + "%")
+            .attr("points", "" + (451 + x_shift) + "," + (401 + y_shift) + " " + (499 + x_shift) + "," + (401 + y_shift) + " " + (499 + x_shift) + "," + (449 + y_shift) + " " + (451 + x_shift) + "," + (449 + y_shift) + "")
+        var box0406 = heat_map.append("polygon")
+            .attr("id", "box0406")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[4][6] * 100 + "%")
+            .attr("points", "" + (501 + x_shift) + "," + (401 + y_shift) + " " + (549 + x_shift) + "," + (401 + y_shift) + " " + (549 + x_shift) + "," + (449 + y_shift) + " " + (501 + x_shift) + "," + (449 + y_shift) + "")
+        var box0407 = heat_map.append("polygon")
+            .attr("id", "box0407")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[4][7] * 100 + "%")
+            .attr("points", "" + (551 + x_shift) + "," + (401 + y_shift) + " " + (599 + x_shift) + "," + (401 + y_shift) + " " + (599 + x_shift) + "," + (449 + y_shift) + " " + (551 + x_shift) + "," + (449 + y_shift) + "")
+        var box0408 = heat_map.append("polygon")
+            .attr("id", "box0408")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[4][8] * 100 + "%")
+            .attr("points", "" + (601 + x_shift) + "," + (401 + y_shift) + " " + (649 + x_shift) + "," + (401 + y_shift) + " " + (649 + x_shift) + "," + (449 + y_shift) + " " + (601 + x_shift) + "," + (449 + y_shift) + "")
+        var box0409 = heat_map.append("polygon")
+            .attr("id", "box0409")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[4][9] * 100 + "%")
+            .attr("points", "" + (651 + x_shift) + "," + (401 + y_shift) + " " + (699 + x_shift) + "," + (401 + y_shift) + " " + (699 + x_shift) + "," + (449 + y_shift) + " " + (651 + x_shift) + "," + (449 + y_shift) + "")
+
+        var box0500 = heat_map.append("polygon")
+            .attr("id", "box0500")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[5][0] * 100 + "%")
+            .attr("points", "" + (201 + x_shift) + "," + (451 + y_shift) + " " + (249 + x_shift) + "," + (451 + y_shift) + " " + (249 + x_shift) + "," + (499 + y_shift) + " " + (201 + x_shift) + "," + (499 + y_shift) + "")
+        var box0501 = heat_map.append("polygon")
+            .attr("id", "box0501")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[5][1] * 100 + "%")
+            .attr("points", "" + (251 + x_shift) + "," + (451 + y_shift) + " " + (299 + x_shift) + "," + (451 + y_shift) + " " + (299 + x_shift) + "," + (499 + y_shift) + " " + (251 + x_shift) + "," + (499 + y_shift) + "")
+        var box0502 = heat_map.append("polygon")
+            .attr("id", "box0502")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[5][2] * 100 + "%")
+            .attr("points", "" + (301 + x_shift) + "," + (451 + y_shift) + " " + (349 + x_shift) + "," + (451 + y_shift) + " " + (349 + x_shift) + "," + (499 + y_shift) + " " + (301 + x_shift) + "," + (499 + y_shift) + "")
+        var box0503 = heat_map.append("polygon")
+            .attr("id", "box0503")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[5][3] * 100 + "%")
+            .attr("points", "" + (351 + x_shift) + "," + (451 + y_shift) + " " + (399 + x_shift) + "," + (451 + y_shift) + " " + (399 + x_shift) + "," + (499 + y_shift) + " " + (351 + x_shift) + "," + (499 + y_shift) + "")
+        var box0504 = heat_map.append("polygon")
+            .attr("id", "box0504")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[5][4] * 100 + "%")
+            .attr("points", "" + (401 + x_shift) + "," + (451 + y_shift) + " " + (449 + x_shift) + "," + (451 + y_shift) + " " + (449 + x_shift) + "," + (499 + y_shift) + " " + (401 + x_shift) + "," + (499 + y_shift) + "")
+        var box0505 = heat_map.append("polygon")
+            .attr("id", "box0505")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[5][5] * 100 + "%")
+            .attr("points", "" + (451 + x_shift) + "," + (451 + y_shift) + " " + (499 + x_shift) + "," + (451 + y_shift) + " " + (499 + x_shift) + "," + (499 + y_shift) + " " + (451 + x_shift) + "," + (499 + y_shift) + "")
+        var box0506 = heat_map.append("polygon")
+            .attr("id", "box0506")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[5][6] * 100 + "%")
+            .attr("points", "" + (501 + x_shift) + "," + (451 + y_shift) + " " + (549 + x_shift) + "," + (451 + y_shift) + " " + (549 + x_shift) + "," + (499 + y_shift) + " " + (501 + x_shift) + "," + (499 + y_shift) + "")
+        var box0507 = heat_map.append("polygon")
+            .attr("id", "box0507")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[5][7] * 100 + "%")
+            .attr("points", "" + (551 + x_shift) + "," + (451 + y_shift) + " " + (599 + x_shift) + "," + (451 + y_shift) + " " + (599 + x_shift) + "," + (499 + y_shift) + " " + (551 + x_shift) + "," + (499 + y_shift) + "")
+        var box0508 = heat_map.append("polygon")
+            .attr("id", "box0508")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[5][8] * 100 + "%")
+            .attr("points", "" + (601 + x_shift) + "," + (451 + y_shift) + " " + (649 + x_shift) + "," + (451 + y_shift) + " " + (649 + x_shift) + "," + (499 + y_shift) + " " + (601 + x_shift) + "," + (499 + y_shift) + "")
+        var box0509 = heat_map.append("polygon")
+            .attr("id", "box0509")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[5][9] * 100 + "%")
+            .attr("points", "" + (651 + x_shift) + "," + (451 + y_shift) + " " + (699 + x_shift) + "," + (451 + y_shift) + " " + (699 + x_shift) + "," + (499 + y_shift) + " " + (651 + x_shift) + "," + (499 + y_shift) + "")
+
+        var box0600 = heat_map.append("polygon")
+            .attr("id", "box0600")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[6][0] * 100 + "%")
+            .attr("points", "" + (201 + x_shift) + "," + (501 + y_shift) + " " + (249 + x_shift) + "," + (501 + y_shift) + " " + (249 + x_shift) + "," + (549 + y_shift) + " " + (201 + x_shift) + "," + (549 + y_shift) + "")
+        var box0601 = heat_map.append("polygon")
+            .attr("id", "box0601")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[6][1] * 100 + "%")
+            .attr("points", "" + (251 + x_shift) + "," + (501 + y_shift) + " " + (299 + x_shift) + "," + (501 + y_shift) + " " + (299 + x_shift) + "," + (549 + y_shift) + " " + (251 + x_shift) + "," + (549 + y_shift) + "")
+        var box0602 = heat_map.append("polygon")
+            .attr("id", "box0602")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[6][2] * 100 + "%")
+            .attr("points", "" + (301 + x_shift) + "," + (501 + y_shift) + " " + (349 + x_shift) + "," + (501 + y_shift) + " " + (349 + x_shift) + "," + (549 + y_shift) + " " + (301 + x_shift) + "," + (549 + y_shift) + "")
+        var box0603 = heat_map.append("polygon")
+            .attr("id", "box0603")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[6][3] * 100 + "%")
+            .attr("points", "" + (351 + x_shift) + "," + (501 + y_shift) + " " + (399 + x_shift) + "," + (501 + y_shift) + " " + (399 + x_shift) + "," + (549 + y_shift) + " " + (351 + x_shift) + "," + (549 + y_shift) + "")
+        var box0604 = heat_map.append("polygon")
+            .attr("id", "box0604")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[6][4] * 100 + "%")
+            .attr("points", "" + (401 + x_shift) + "," + (501 + y_shift) + " " + (449 + x_shift) + "," + (501 + y_shift) + " " + (449 + x_shift) + "," + (549 + y_shift) + " " + (401 + x_shift) + "," + (549 + y_shift) + "")
+        var box0605 = heat_map.append("polygon")
+            .attr("id", "box0605")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[6][5] * 100 + "%")
+            .attr("points", "" + (451 + x_shift) + "," + (501 + y_shift) + " " + (499 + x_shift) + "," + (501 + y_shift) + " " + (499 + x_shift) + "," + (549 + y_shift) + " " + (451 + x_shift) + "," + (549 + y_shift) + "")
+        var box0606 = heat_map.append("polygon")
+            .attr("id", "box0606")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[6][6] * 100 + "%")
+            .attr("points", "" + (501 + x_shift) + "," + (501 + y_shift) + " " + (549 + x_shift) + "," + (501 + y_shift) + " " + (549 + x_shift) + "," + (549 + y_shift) + " " + (501 + x_shift) + "," + (549 + y_shift) + "")
+        var box0607 = heat_map.append("polygon")
+            .attr("id", "box0607")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[6][7] * 100 + "%")
+            .attr("points", "" + (551 + x_shift) + "," + (501 + y_shift) + " " + (599 + x_shift) + "," + (501 + y_shift) + " " + (599 + x_shift) + "," + (549 + y_shift) + " " + (551 + x_shift) + "," + (549 + y_shift) + "")
+        var box0608 = heat_map.append("polygon")
+            .attr("id", "box0608")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[6][8] * 100 + "%")
+            .attr("points", "" + (601 + x_shift) + "," + (501 + y_shift) + " " + (649 + x_shift) + "," + (501 + y_shift) + " " + (649 + x_shift) + "," + (549 + y_shift) + " " + (601 + x_shift) + "," + (549 + y_shift) + "")
+        var box0609 = heat_map.append("polygon")
+            .attr("id", "box0609")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[6][9] * 100 + "%")
+            .attr("points", "" + (651 + x_shift) + "," + (501 + y_shift) + " " + (699 + x_shift) + "," + (501 + y_shift) + " " + (699 + x_shift) + "," + (549 + y_shift) + " " + (651 + x_shift) + "," + (549 + y_shift) + "")
+
+        var box0700 = heat_map.append("polygon")
+            .attr("id", "box0700")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[7][0] * 100 + "%")
+            .attr("points", "" + (201 + x_shift) + "," + (551 + y_shift) + " " + (249 + x_shift) + "," + (551 + y_shift) + " " + (249 + x_shift) + "," + (599 + y_shift) + " " + (201 + x_shift) + "," + (599 + y_shift) + "")
+        var box0701 = heat_map.append("polygon")
+            .attr("id", "box0701")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[7][1] * 100 + "%")
+            .attr("points", "" + (251 + x_shift) + "," + (551 + y_shift) + " " + (299 + x_shift) + "," + (551 + y_shift) + " " + (299 + x_shift) + "," + (599 + y_shift) + " " + (251 + x_shift) + "," + (599 + y_shift) + "")
+        var box0702 = heat_map.append("polygon")
+            .attr("id", "box0702")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[7][2] * 100 + "%")
+            .attr("points", "" + (301 + x_shift) + "," + (551 + y_shift) + " " + (349 + x_shift) + "," + (551 + y_shift) + " " + (349 + x_shift) + "," + (599 + y_shift) + " " + (301 + x_shift) + "," + (599 + y_shift) + "")
+        var box0703 = heat_map.append("polygon")
+            .attr("id", "box0703")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[7][3] * 100 + "%")
+            .attr("points", "" + (351 + x_shift) + "," + (551 + y_shift) + " " + (399 + x_shift) + "," + (551 + y_shift) + " " + (399 + x_shift) + "," + (599 + y_shift) + " " + (351 + x_shift) + "," + (599 + y_shift) + "")
+        var box0704 = heat_map.append("polygon")
+            .attr("id", "box0704")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[7][4] * 100 + "%")
+            .attr("points", "" + (401 + x_shift) + "," + (551 + y_shift) + " " + (449 + x_shift) + "," + (551 + y_shift) + " " + (449 + x_shift) + "," + (599 + y_shift) + " " + (401 + x_shift) + "," + (599 + y_shift) + "")
+        var box0705 = heat_map.append("polygon")
+            .attr("id", "box0705")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[7][5] * 100 + "%")
+            .attr("points", "" + (451 + x_shift) + "," + (551 + y_shift) + " " + (499 + x_shift) + "," + (551 + y_shift) + " " + (499 + x_shift) + "," + (599 + y_shift) + " " + (451 + x_shift) + "," + (599 + y_shift) + "")
+        var box0706 = heat_map.append("polygon")
+            .attr("id", "box0706")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[7][6] * 100 + "%")
+            .attr("points", "" + (501 + x_shift) + "," + (551 + y_shift) + " " + (549 + x_shift) + "," + (551 + y_shift) + " " + (549 + x_shift) + "," + (599 + y_shift) + " " + (501 + x_shift) + "," + (599 + y_shift) + "")
+        var box0707 = heat_map.append("polygon")
+            .attr("id", "box0707")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[7][7] * 100 + "%")
+            .attr("points", "" + (551 + x_shift) + "," + (551 + y_shift) + " " + (599 + x_shift) + "," + (551 + y_shift) + " " + (599 + x_shift) + "," + (599 + y_shift) + " " + (551 + x_shift) + "," + (599 + y_shift) + "")
+        var box0708 = heat_map.append("polygon")
+            .attr("id", "box0708")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[7][8] * 100 + "%")
+            .attr("points", "" + (601 + x_shift) + "," + (551 + y_shift) + " " + (649 + x_shift) + "," + (551 + y_shift) + " " + (649 + x_shift) + "," + (599 + y_shift) + " " + (601 + x_shift) + "," + (599 + y_shift) + "")
+        var box0709 = heat_map.append("polygon")
+            .attr("id", "box0709")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[7][9] * 100 + "%")
+            .attr("points", "" + (651 + x_shift) + "," + (551 + y_shift) + " " + (699 + x_shift) + "," + (551 + y_shift) + " " + (699 + x_shift) + "," + (599 + y_shift) + " " + (651 + x_shift) + "," + (599 + y_shift) + "")
+
+        var box0800 = heat_map.append("polygon")
+            .attr("id", "box0800")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[8][0] * 100 + "%")
+            .attr("points", "" + (201 + x_shift) + "," + (601 + y_shift) + " " + (249 + x_shift) + "," + (601 + y_shift) + " " + (249 + x_shift) + "," + (649 + y_shift) + " " + (201 + x_shift) + "," + (649 + y_shift) + "")
+        var box0801 = heat_map.append("polygon")
+            .attr("id", "box0801")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[8][1] * 100 + "%")
+            .attr("points", "" + (251 + x_shift) + "," + (601 + y_shift) + " " + (299 + x_shift) + "," + (601 + y_shift) + " " + (299 + x_shift) + "," + (649 + y_shift) + " " + (251 + x_shift) + "," + (649 + y_shift) + "")
+        var box0802 = heat_map.append("polygon")
+            .attr("id", "box0802")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[8][2] * 100 + "%")
+            .attr("points", "" + (301 + x_shift) + "," + (601 + y_shift) + " " + (349 + x_shift) + "," + (601 + y_shift) + " " + (349 + x_shift) + "," + (649 + y_shift) + " " + (301 + x_shift) + "," + (649 + y_shift) + "")
+        var box0803 = heat_map.append("polygon")
+            .attr("id", "box0803")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[8][3] * 100 + "%")
+            .attr("points", "" + (351 + x_shift) + "," + (601 + y_shift) + " " + (399 + x_shift) + "," + (601 + y_shift) + " " + (399 + x_shift) + "," + (649 + y_shift) + " " + (351 + x_shift) + "," + (649 + y_shift) + "")
+        var box0804 = heat_map.append("polygon")
+            .attr("id", "box0804")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[8][4] * 100 + "%")
+            .attr("points", "" + (401 + x_shift) + "," + (601 + y_shift) + " " + (449 + x_shift) + "," + (601 + y_shift) + " " + (449 + x_shift) + "," + (649 + y_shift) + " " + (401 + x_shift) + "," + (649 + y_shift) + "")
+        var box0805 = heat_map.append("polygon")
+            .attr("id", "box0805")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[8][5] * 100 + "%")
+            .attr("points", "" + (451 + x_shift) + "," + (601 + y_shift) + " " + (499 + x_shift) + "," + (601 + y_shift) + " " + (499 + x_shift) + "," + (649 + y_shift) + " " + (451 + x_shift) + "," + (649 + y_shift) + "")
+        var box0806 = heat_map.append("polygon")
+            .attr("id", "box0806")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[8][6] * 100 + "%")
+            .attr("points", "" + (501 + x_shift) + "," + (601 + y_shift) + " " + (549 + x_shift) + "," + (601 + y_shift) + " " + (549 + x_shift) + "," + (649 + y_shift) + " " + (501 + x_shift) + "," + (649 + y_shift) + "")
+        var box0807 = heat_map.append("polygon")
+            .attr("id", "box0807")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[8][7] * 100 + "%")
+            .attr("points", "" + (551 + x_shift) + "," + (601 + y_shift) + " " + (599 + x_shift) + "," + (601 + y_shift) + " " + (599 + x_shift) + "," + (649 + y_shift) + " " + (551 + x_shift) + "," + (649 + y_shift) + "")
+        var box0808 = heat_map.append("polygon")
+            .attr("id", "box0808")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[8][8] * 100 + "%")
+            .attr("points", "" + (601 + x_shift) + "," + (601 + y_shift) + " " + (649 + x_shift) + "," + (601 + y_shift) + " " + (649 + x_shift) + "," + (649 + y_shift) + " " + (601 + x_shift) + "," + (649 + y_shift) + "")
+        var box0809 = heat_map.append("polygon")
+            .attr("id", "box0809")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[8][9] * 100 + "%")
+            .attr("points", "" + (651 + x_shift) + "," + (601 + y_shift) + " " + (699 + x_shift) + "," + (601 + y_shift) + " " + (699 + x_shift) + "," + (649 + y_shift) + " " + (651 + x_shift) + "," + (649 + y_shift) + "")
+
+        var box0900 = heat_map.append("polygon")
+            .attr("id", "box0900")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[9][0] * 100 + "%")
+            .attr("points", "" + (201 + x_shift) + "," + (651 + y_shift) + " " + (249 + x_shift) + "," + (651 + y_shift) + " " + (249 + x_shift) + "," + (699 + y_shift) + " " + (201 + x_shift) + "," + (699 + y_shift) + "")
+        var box0901 = heat_map.append("polygon")
+            .attr("id", "box0901")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[9][1] * 100 + "%")
+            .attr("points", "" + (251 + x_shift) + "," + (651 + y_shift) + " " + (299 + x_shift) + "," + (651 + y_shift) + " " + (299 + x_shift) + "," + (699 + y_shift) + " " + (251 + x_shift) + "," + (699 + y_shift) + "")
+        var box0902 = heat_map.append("polygon")
+            .attr("id", "box0902")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[9][2] * 100 + "%")
+            .attr("points", "" + (301 + x_shift) + "," + (651 + y_shift) + " " + (349 + x_shift) + "," + (651 + y_shift) + " " + (349 + x_shift) + "," + (699 + y_shift) + " " + (301 + x_shift) + "," + (699 + y_shift) + "")
+        var box0903 = heat_map.append("polygon")
+            .attr("id", "box0903")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[9][3] * 100 + "%")
+            .attr("points", "" + (351 + x_shift) + "," + (651 + y_shift) + " " + (399 + x_shift) + "," + (651 + y_shift) + " " + (399 + x_shift) + "," + (699 + y_shift) + " " + (351 + x_shift) + "," + (699 + y_shift) + "")
+        var box0904 = heat_map.append("polygon")
+            .attr("id", "box0904")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[9][4] * 100 + "%")
+            .attr("points", "" + (401 + x_shift) + "," + (651 + y_shift) + " " + (449 + x_shift) + "," + (651 + y_shift) + " " + (449 + x_shift) + "," + (699 + y_shift) + " " + (401 + x_shift) + "," + (699 + y_shift) + "")
+        var box0905 = heat_map.append("polygon")
+            .attr("id", "box0905")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[9][5] * 100 + "%")
+            .attr("points", "" + (451 + x_shift) + "," + (651 + y_shift) + " " + (499 + x_shift) + "," + (651 + y_shift) + " " + (499 + x_shift) + "," + (699 + y_shift) + " " + (451 + x_shift) + "," + (699 + y_shift) + "")
+        var box0906 = heat_map.append("polygon")
+            .attr("id", "box0906")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[9][6] * 100 + "%")
+            .attr("points", "" + (501 + x_shift) + "," + (651 + y_shift) + " " + (549 + x_shift) + "," + (651 + y_shift) + " " + (549 + x_shift) + "," + (699 + y_shift) + " " + (501 + x_shift) + "," + (699 + y_shift) + "")
+        var box0907 = heat_map.append("polygon")
+            .attr("id", "box0907")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[9][7] * 100 + "%")
+            .attr("points", "" + (551 + x_shift) + "," + (651 + y_shift) + " " + (599 + x_shift) + "," + (651 + y_shift) + " " + (599 + x_shift) + "," + (699 + y_shift) + " " + (551 + x_shift) + "," + (699 + y_shift) + "")
+        var box0908 = heat_map.append("polygon")
+            .attr("id", "box0908")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[9][8] * 100 + "%")
+            .attr("points", "" + (601 + x_shift) + "," + (651 + y_shift) + " " + (649 + x_shift) + "," + (651 + y_shift) + " " + (649 + x_shift) + "," + (699 + y_shift) + " " + (601 + x_shift) + "," + (699 + y_shift) + "")
+        var box0909 = heat_map.append("polygon")
+            .attr("id", "box0909")
+            .attr("fill", "hsl(0,100%," + features_dummy_data[9][9] * 100 + "%")
+            .attr("points", "" + (651 + x_shift) + "," + (651 + y_shift) + " " + (699 + x_shift) + "," + (651 + y_shift) + " " + (699 + x_shift) + "," + (699 + y_shift) + " " + (651 + x_shift) + "," + (699 + y_shift) + "")
+
+        function createCountryMap() {
+            country_map = {}
+            country_map["AGO"] = "Angola"
+            country_map["ALB"] = "Albania"
+            country_map["AFG"] = "Afghanistan"
+            country_map["ASM"] = "American Samoa"
+            country_map["ARE"] = "United Arab Emirates"
+            country_map["ARG"] = "Argentina"
+            country_map["ARM"] = "Armenia"
+            country_map["ATA"] = "Antarctica"
+            country_map["AIA"] = "Anguilla"
+            country_map["ABW"] = "Aruba"
+            country_map["ATF"] = "French Southern Territories"
+            country_map["AUS"] = "Australia"
+            country_map["AUT"] = "Austria"
+            country_map["AZE"] = "Azerbaijan"
+            country_map["BDI"] = "Burundi"
+            country_map["BEL"] = "Belgium"
+            country_map["BEN"] = "Benin"
+            country_map["BFA"] = "Burkina Faso"
+            country_map["BGD"] = "Bangladesh"
+            country_map["BGR"] = "Bulgaria"
+            country_map["BHS"] = "Bahamas"
+            country_map["BRB"] = "Barbados"
+            country_map["BHR"] = "Bahrain"
+            country_map["BMU"] = "Bermuda"
+            country_map["BIH"] = "Bosnia and Herzegovina"
+            country_map["BLR"] = "Belarus"
+            country_map["BLZ"] = "Belize"
+            country_map["BOL"] = "Bolivia"
+            country_map["BRA"] = "Brazil"
+            country_map["BRN"] = "Brunei"
+            country_map["BTN"] = "Bhutan"
+            country_map["BWA"] = "Botswana"
+            country_map["CUB"] = "Cuba"
+            country_map["CAF"] = "Central African Republic"
+            country_map["CAN"] = "Canada"
+            country_map["CHE"] = "Switzerland"
+            country_map["CHL"] = "Chile"
+            country_map["CHN"] = "China"
+            country_map["CIV"] = "Côte d'Ivoire"
+            country_map["CMR"] = "Cameroon"
+            country_map["CRI"] = "Costa Rica"
+            country_map["COD"] = "D.R. Congo"
+            country_map["COG"] = "Congo"
+            country_map["COL"] = "Colombia"
+            country_map["CZE"] = "Czech Republic"
+            country_map["DEU"] = "Germany"
+            country_map["DJI"] = "Djibouti"
+            country_map["DNK"] = "Denmark"
+            country_map["DOM"] = "Dominican Republic"
+            country_map["DMA"] = "Dominica"
+            country_map["DZA"] = "Algeria"
+            country_map["ECU"] = "Ecuador"
+            country_map["EGY"] = "Egypt"
+            country_map["ERI"] = "Eritrea"
+            country_map["ESP"] = "Spain"
+            country_map["EST"] = "Estonia"
+            country_map["ETH"] = "Ethiopia"
+            country_map["FIN"] = "Finland"
+            country_map["FJI"] = "Fiji"
+            country_map["FLK"] = "Falkland Islands"
+            country_map["FRA"] = "France"
+            country_map["GAB"] = "Gabon"
+            country_map["GBR"] = "England"
+            country_map["GEO"] = "Georgia"
+            country_map["GHA"] = "Ghana"
+            country_map["GIN"] = "Guinea"
+            country_map["GMB"] = "Gambia"
+            country_map["GNB"] = "Guinea-Bissau"
+            country_map["GNQ"] = "Equatorial Guinea"
+            country_map["EHW"] = "Western Sahara"
+            country_map["GRC"] = "Greece"
+            country_map["GRL"] = "Greenland"
+            country_map["GTM"] = "Guatemala"
+            country_map["GUY"] = "Guyana"
+            country_map["HND"] = "Honduras"
+            country_map["HRV"] = "Croatia"
+            country_map["HTI"] = "Haiti"
+            country_map["HUN"] = "Hungary"
+            country_map["IDN"] = "Indonesia"
+            country_map["IND"] = "India"
+            country_map["IRL"] = "Ireland"
+            country_map["IRN"] = "Iran"
+            country_map["IRQ"] = "Iraq"
+            country_map["ISL"] = "Iceland"
+            country_map["ISR"] = "Israel"
+            country_map["ITA"] = "Italy"
+            country_map["JAM"] = "Jamaica"
+            country_map["JOR"] = "Jordan"
+            country_map["JPN"] = "Japan"
+            country_map["KAZ"] = "Kazakhstan"
+            country_map["KEN"] = "Kenya"
+            country_map["KGZ"] = "Kyrgyzstan"
+            country_map["KHM"] = "Cambodia"
+            country_map["KOR"] = "South Korea"
+            country_map["KWT"] = "Kuwait"
+            country_map["LAO"] = "Laos"
+            country_map["LBN"] = "Lebanon"
+            country_map["LBR"] = "Liberia"
+            country_map["LBY"] = "Libya"
+            country_map["LKA"] = "Sri Lanka"
+            country_map["LSO"] = "Lesotho"
+            country_map["LTU"] = "Lithuania"
+            country_map["LUX"] = "Luxembourg"
+            country_map["LVA"] = "Latvia"
+            country_map["MAR"] = "Morocco"
+            country_map["MDG"] = "Madagascar"
+            country_map["MEX"] = "Mexico"
+            country_map["MKD"] = "Macedonia"
+            country_map["MLI"] = "Mali"
+            country_map["MMR"] = "Myanmar"
+            country_map["MNE"] = "Montenegro"
+            country_map["MNG"] = "Mongolia"
+            country_map["MOZ"] = "Mozambique"
+            country_map["MRT"] = "Mauritania"
+            country_map["MWI"] = "Malawi"
+            country_map["MYS"] = "Malaysia"
+            country_map["NAM"] = "Namibia"
+            country_map["NCL"] = "New Caledonia"
+            country_map["NER"] = "Niger"
+            country_map["NGA"] = "Nigeria"
+            country_map["NIC"] = "Nicaragua"
+            country_map["NLD"] = "Netherlands"
+            country_map["NOR"] = "Norway"
+            country_map["NPL"] = "Nepal"
+            country_map["NZL"] = "New Zealand"
+            country_map["OMN"] = "Oman"
+            country_map["PAK"] = "Pakistan"
+            country_map["PAN"] = "Panama"
+            country_map["PER"] = "Peru"
+            country_map["PHL"] = "Philippines"
+            country_map["PNG"] = "Papua New Guinea"
+            country_map["POL"] = "Poland"
+            country_map["PRI"] = "Puerto Rico"
+            country_map["PRK"] = "North Korea"
+            country_map["PRT"] = "Portugal"
+            country_map["PRY"] = "Paraguay"
+            country_map["QAT"] = "Qatar"
+            country_map["ROU"] = "Romania"
+            country_map["RUS"] = "Russia"
+            country_map["RWA"] = "Rwanda"
+            country_map["SAU"] = "Saudi Arabia"
+            country_map["SDN"] = "Sudan"
+            country_map["SDS"] = ""
+            country_map["SEN"] = "Senegal"
+            country_map["SLB"] = "Solomon Islands"
+            country_map["SLE"] = "Sierra Leone"
+            country_map["SLV"] = "El Salvador"
+            country_map["SOM"] = "Somalia"
+            country_map["SRB"] = "Republic of Serbia"
+            country_map["SUR"] = "Suriname"
+            country_map["SVK"] = "Slovakia"
+            country_map["SVN"] = "Slovenia"
+            country_map["SWE"] = "Sweden"
+            country_map["SWZ"] = "Eswatini"
+            country_map["SYR"] = "Syria"
+            country_map["TCD"] = "Chad"
+            country_map["TGO"] = "Togo"
+            country_map["THA"] = "Thailand"
+            country_map["TJK"] = "Tajikistan"
+            country_map["TKM"] = "Turkmenistan"
+            country_map["TLS"] = "Timor-Leste"
+            country_map["TTO"] = "Trinidad and Tobago"
+            country_map["TUN"] = "Tunisia"
+            country_map["TUR"] = "Turkey"
+            country_map["TWN"] = "Taiwan"
+            country_map["TZA"] = "Tanzania"
+            country_map["UGA"] = "Uganda"
+            country_map["UKR"] = "Ukraine"
+            country_map["URY"] = "Uruguay"
+            country_map["USA"] = "USA"
+            country_map["UZB"] = "Uzbekistan"
+            country_map["VEN"] = "Venezuela"
+            country_map["VNM"] = "Vietnam"
+            country_map["VUT"] = "Vanuatu"
+            country_map["PSE"] = "Palestine"
+            country_map["YEM"] = "Yemen"
+            country_map["ZAF"] = "South Africa"
+            country_map["ZMB"] = "Zambia"
+            country_map["ZWE"] = "Zimbabwe"
+
+
+            return country_map;
+        }
+
+        function createCountryCodesMap() {
+            var countryCodesMap = {
+                "AF": "AFG",
+                "AL": "ALB",
+                "DZ": "DZA",
+                "AS": "ASM",
+                "AD": "AND",
+                "AO": "AGO",
+                "AI": "AIA",
+                "AQ": "ATA",
+                "AG": "ATG",
+                "AR": "ARG",
+                "AM": "ARM",
+                "AW": "ABW",
+                "AU": "AUS",
+                "AT": "AUT",
+                "AZ": "AZE",
+                "BS": "BHS",
+                "BH": "BHR",
+                "BD": "BGD",
+                "BB": "BRB",
+                "BY": "BLR",
+                "BE": "BEL",
+                "BZ": "BLZ",
+                "BJ": "BEN",
+                "BM": "BMU",
+                "BT": "BTN",
+                "BO": "BOL",
+                "BA": "BIH",
+                "BW": "BWA",
+                "BV": "BVT",
+                "BR": "BRA",
+                "IO": "IOT",
+                "BN": "BRN",
+                "BG": "BGR",
+                "BF": "BFA",
+                "BI": "BDI",
+                "KH": "KHM",
+                "CM": "CMR",
+                "CA": "CAN",
+                "CV": "CPV",
+                "KY": "CYM",
+                "CF": "CAF",
+                "TD": "TCD",
+                "CL": "CHL",
+                "CN": "CHN",
+                "CX": "CXR",
+                "CC": "CCK",
+                "CO": "COL",
+                "KM": "COM",
+                "CG": "COG",
+                "CD": "COD",
+                "CK": "COK",
+                "CR": "CRI",
+                "CI": "CIV",
+                "HR": "HRV",
+                "CU": "CUB",
+                "CY": "CYP",
+                "CZ": "CZE",
+                "DK": "DNK",
+                "DJ": "DJI",
+                "DM": "DMA",
+                "DO": "DOM",
+                "EC": "ECU",
+                "EG": "EGY",
+                "SV": "SLV",
+                "GQ": "GNQ",
+                "ER": "ERI",
+                "EE": "EST",
+                "ET": "ETH",
+                "FK": "FLK",
+                "FO": "FRO",
+                "FJ": "FJI",
+                "FI": "FIN",
+                "FR": "FRA",
+                "GF": "GUF",
+                "PF": "PYF",
+                "TF": "ATF",
+                "GA": "GAB",
+                "GM": "GMB",
+                "GE": "GEO",
+                "DE": "DEU",
+                "GH": "GHA",
+                "GI": "GIB",
+                "GR": "GRC",
+                "GL": "GRL",
+                "GD": "GRD",
+                "GP": "GLP",
+                "GU": "GU",
+                "GT": "GTM",
+                "GG": "GG",
+                "GN": "GIN",
+                "GW": "GNB",
+                "GY": "GUY",
+                "HT": "HTI",
+                "HM": "HMD",
+                "VA": "VAT",
+                "HN": "HND",
+                "HK": "HK",
+                "HU": "HUN",
+                "IS": "ISL",
+                "IN": "IND",
+                "ID": "IDN",
+                "IR": "IRN",
+                "IQ": "IRQ",
+                "IE": "IRL",
+                "IM": "IM",
+                "IL": "ISR",
+                "IT": "ITA",
+                "JM": "JAM",
+                "JP": "JPN",
+                "JE": "JE",
+                "JO": "JOR",
+                "KZ": "KAZ",
+                "KE": "KEN",
+                "KI": "KI",
+                "KP": "PRK",
+                "KR": "KOR",
+                "KW": "KWT",
+                "KG": "KGZ",
+                "LA": "LAO",
+                "LV": "LVA",
+                "LB": "LBN",
+                "LS": "LSO",
+                "LR": "LBR",
+                "LY": "LBY",
+                "LI": "LI",
+                "LT": "LTU",
+                "LU": "LUX",
+                "MO": "MO",
+                "MK": "MKD",
+                "MG": "MDG",
+                "MW": "MWI",
+                "MY": "MYS",
+                "MV": "MV",
+                "ML": "MLI",
+                "MT": "MT",
+                "MH": "MH",
+                "MQ": "MQ",
+                "MR": "MR",
+                "MU": "MU",
+                "YT": "YT",
+                "MX": "MEX",
+                "FM": "FM",
+                "MD": "MD",
+                "MC": "MC",
+                "MN": "MNG",
+                "ME": "ME",
+                "MS": "MS",
+                "MA": "MAR",
+                "MZ": "MOZ",
+                "MM": "MMR",
+                "NA": "NAM",
+                "NR": "NR",
+                "NP": "NPL",
+                "NL": "NLD",
+                "AN": "AN",
+                "NC": "NCL",
+                "NZ": "NZL",
+                "NI": "NIC",
+                "NE": "NER",
+                "NG": "NGA",
+                "NU": "NU",
+                "NF": "NF",
+                "MP": "MP",
+                "NO": "NOR",
+                "OM": "OMN",
+                "PK": "PAK",
+                "PW": "PW",
+                "PS": "PS",
+                "PA": "PAN",
+                "PG": "PNG",
+                "PY": "PRY",
+                "PE": "PER",
+                "PH": "PHL",
+                "PN": "PN",
+                "PL": "POL",
+                "PT": "PRT",
+                "PR": "PRI",
+                "QA": "QAT",
+                "RE": "RE",
+                "RO": "ROU",
+                "RU": "RUS",
+                "RW": "RWA",
+                "SH": "SH",
+                "KN": "KN",
+                "LC": "LC",
+                "PM": "PM",
+                "VC": "VC",
+                "WS": "WS",
+                "SM": "SM",
+                "ST": "ST",
+                "SA": "SAU",
+                "SN": "SEN",
+                "RS": "SRB",
+                "SC": "SC",
+                "SL": "SLE",
+                "SG": "SG",
+                "SK": "SVK",
+                "SI": "SVN",
+                "SB": "SB",
+                "SO": "SOM",
+                "ZA": "ZAF",
+                "GS": "GS",
+                "SS": "SS",
+                "ES": "ESP",
+                "LK": "LKA",
+                "SD": "SDN",
+                "SR": "SUR",
+                "SJ": "SJ",
+                "SZ": "SWZ",
+                "SE": "SWE",
+                "CH": "CHE",
+                "SY": "SYR",
+                "TW": "TWN",
+                "TJ": "TJK",
+                "TZ": "TZA",
+                "TH": "THA",
+                "TL": "TLS",
+                "TG": "TGO",
+                "TK": "TK",
+                "TO": "TO",
+                "TT": "TT",
+                "TN": "TUN",
+                "TR": "TUR",
+                "TM": "TKM",
+                "TC": "TC",
+                "TV": "TV",
+                "UG": "UGA",
+                "UA": "UKR",
+                "AE": "ARE",
+                "GB": "GBR",
+                "US": "USA",
+                "UM": "UM",
+                "UY": "URY",
+                "UZ": "UZB",
+                "VU": "VU",
+                "VE": "VEN",
+                "VN": "VNM",
+                "VG": "VG",
+                "VI": "VI",
+                "WF": "WF",
+                "EH": "EHW",
+                "YE": "YEM",
+                "ZM": "ZMB",
+                "ZW": "ZWE"
+            }
+            return countryCodesMap;
+        }
+
+        function error() {
+            console.log(error);
+        }
+    </script>
+    <div><br></div>
+</body>
+
+</html>
