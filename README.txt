@@ -1,4 +1,4 @@
-# PREDICTING REGIONAL SONG POPULARITY WITH SPOTIFY API, 2023
+#PREDICTING REGIONAL SONG POPULARITY WITH SPOTIFY API, 2023
 
 *	Developed a Random Forest model to predict song popularity by region, analyzing over 220,000 songs using data from the Spotify API.
 *	Employed D3 to create an interactive world map visualization, enabling dynamic visualization of song popularity trends across different global regions.
