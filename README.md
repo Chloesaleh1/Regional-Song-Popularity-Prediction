@@ -1,9 +1,11 @@
-#PREDICTING REGIONAL SONG POPULARITY WITH SPOTIFY API, 2023
+# PREDICTING REGIONAL SONG POPULARITY WITH SPOTIFY API, 2023
 
 *	Developed a Random Forest model to predict song popularity by region, analyzing over 220,000 songs using data from the Spotify API.
 *	Employed D3 to create an interactive world map visualization, enabling dynamic visualization of song popularity trends across different global regions.
 *	Conducted A/B testing to optimize data visualization, choosing a Cleveland dot plot for its clarity 
 *	Implemented a data processing pipeline, involving data cleaning, NaN value handling, and feature encoding using OneHotEncoder to prepare the dataset.
+
+![team032poster](https://github.com/Chloesaleh1/Regional-Song-Popularity-Prediction/assets/98928766/5d4b26b5-decc-4919-9ec0-683ef9fed8ed)
 
 This folder contains all code, notebooks, scripts and input/output files used during the course of the Project by Team 32. 
 
